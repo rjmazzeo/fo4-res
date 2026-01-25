@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python installers
+*.exe
+*.msi
+*.dmg
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
