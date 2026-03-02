@@ -10,6 +10,66 @@ import ctypes
 import subprocess
 from pathlib import Path
 
+# Windows FOLDERID_Documents GUID for SHGetKnownFolderPath
+FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
+
+def get_windows_documents_path():
+    """Get the real Documents path on Windows (handles OneDrive redirect)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        shell32 = ctypes.windll.shell32
+        ole32 = ctypes.windll.ole32
+        # GUID buffer: Data1, Data2, Data3, Data4[8]
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_ulong),
+                ("Data2", ctypes.c_ushort),
+                ("Data3", ctypes.c_ushort),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+        # Parse FOLDERID_DOCUMENTS into GUID
+        guid = GUID()
+        ole32.CLSIDFromString(FOLDERID_DOCUMENTS, ctypes.byref(guid))
+        path_ptr = ctypes.c_void_p()
+        if shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(path_ptr)) == 0:
+            path = ctypes.wstring_at(path_ptr.value)
+            ole32.CoTaskMemFree(path_ptr.value)
+            return path
+    except Exception:
+        pass
+    return None
+
+def get_documents_candidates():
+    """Return candidate Documents folder paths (standard + OneDrive variants)."""
+    candidates = []
+    # 1. Windows Known Folder API (canonical; OneDrive-redirected if applicable)
+    win_docs = get_windows_documents_path()
+    if win_docs:
+        candidates.append(Path(win_docs))
+    # 2. expanduser (standard profile Documents)
+    candidates.append(Path(os.path.expanduser("~/Documents")))
+    # 3. OneDrive variants under user profile
+    user_profile = Path(os.path.expanduser("~"))
+    for item in user_profile.iterdir():
+        if not item.is_dir():
+            continue
+        name = item.name
+        if name == "OneDrive":
+            candidates.append(item / "Documents")
+        elif name.startswith("OneDrive - "):
+            candidates.append(item / "Documents")
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for p in candidates:
+        p_resolved = p.resolve() if p.exists() else p
+        key = str(p_resolved).lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(p_resolved)
+    return result
+
 def get_screen_resolution():
     """Get the primary monitor's resolution."""
     try:
@@ -22,20 +82,19 @@ def get_screen_resolution():
         return None, None
 
 def find_fallout4_ini():
-    """Find the Fallout 4 INI file in the user's Documents folder."""
-    documents_path = Path(os.path.expanduser("~/Documents"))
-    fallout4_path = documents_path / "My Games" / "Fallout4"
-    
-    # Try Fallout4Prefs.ini first (most common for resolution settings)
-    prefs_ini = fallout4_path / "Fallout4Prefs.ini"
-    if prefs_ini.exists():
-        return prefs_ini
-    
-    # Fallback to Fallout4.ini
-    main_ini = fallout4_path / "Fallout4.ini"
-    if main_ini.exists():
-        return main_ini
-    
+    """Find the Fallout 4 INI file in the user's Documents folder.
+    Checks standard Documents and OneDrive-backed locations.
+    """
+    for documents_path in get_documents_candidates():
+        fallout4_path = documents_path / "My Games" / "Fallout4"
+        # Try Fallout4Prefs.ini first (most common for resolution settings)
+        prefs_ini = fallout4_path / "Fallout4Prefs.ini"
+        if prefs_ini.exists():
+            return prefs_ini
+        # Fallback to Fallout4.ini
+        main_ini = fallout4_path / "Fallout4.ini"
+        if main_ini.exists():
+            return main_ini
     return None
 
 def launch_fallout4_via_steam():
@@ -169,7 +228,8 @@ def main():
     
     if ini_path is None:
         print("ERROR: Could not find Fallout 4 INI file!")
-        print("Expected location: Documents/My Games/Fallout4/Fallout4Prefs.ini")
+        print("Expected: Documents/My Games/Fallout4/Fallout4Prefs.ini")
+        print("(Searched standard Documents and OneDrive-backed locations.)")
         input("Press Enter to exit...")
         sys.exit(1)
     
